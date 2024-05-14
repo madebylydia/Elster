@@ -1,83 +1,87 @@
-﻿// using Discord.Commands;
-// using Discord.WebSocket;
-// using Elster.Common;
-// using Microsoft.Extensions.Configuration;
-// using Microsoft.Extensions.DependencyInjection;
-// using Microsoft.Extensions.Hosting;
-// using Microsoft.Extensions.Hosting.Internal;
-// using Serilog;
+﻿using Discord.Commands;
+using Discord.WebSocket;
+using Elster.Common.Folders;
+using Elster.Helpers.Config;
+using Elster.Services;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Serilog;
 
-// namespace Elster
-// {
-//     public class Elster
-//     {
-//         /// <summary>
-//         /// I mean... You know what this is about, right?
-//         /// </summary>
-//         public static async Task Main(string[] args)
-//         {
-//             Log.Logger = new LoggerConfiguration()
-//                 .MinimumLevel.Debug()
-//                 .Enrich.FromLogContext()
-//                 .WriteTo.Console()
-//                 .CreateLogger();
+namespace Elster;
 
-//             IHost host = ConfigureServices(args);
+/// <summary>
+/// I just made this class for my sanity.
+/// This should go into the Program.cs tho.
+/// </summary>
+class Elster
+{
+    public static async Task Main(string[] args)
+    {
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Debug()
+            .Enrich.FromLogContext()
+            .WriteTo.Console()
+            .CreateLogger();
 
-//             IConfiguration config = GetConfiguration(new HostingEnvironment());
-//             if (config["TOKEN"] is null)
-//             {
-//                 throw new ApplicationException("Could not find required configuration key: TOKEN");
-//             }
+        HostApplicationBuilder hostBuilder = Host.CreateApplicationBuilder(args);
 
-//             DiscordShardedClient client = host.Services.GetRequiredService<DiscordShardedClient>();
+        IConfigurationRoot config = GetConfiguration(hostBuilder.Environment);
+        RootSettings settings =
+            config.Get<RootSettings>()
+            ?? throw new ApplicationException(
+                "Invalid configuration. This more likely mean a configuration key is missing."
+            );
+        hostBuilder.Configuration.AddConfiguration(config);
 
-//             client.Log += LogAsync;
+        DiscordShardedClient client = new(
+            new DiscordSocketConfig
+            {
+                LogLevel = Discord.LogSeverity.Debug,
+                MessageCacheSize = 1000,
+                GatewayIntents = Discord.GatewayIntents.AllUnprivileged,
+            }
+        );
 
-//             await host.RunAsync();
-//         }
+        hostBuilder
+            .Services.AddSingleton(client)
+            .AddSingleton<DiscordShardedClient>()
+            .AddSingleton(settings)
+            .AddSingleton<CommandService>()
+            .AddSingleton<CommandHandlerService>()
+            .AddHostedService<ElsterBot>();
 
-//         /// <summary>
-//         /// Configures the services for the bot.
-//         /// </summary>
-//         /// <param name="args">The arguments passed to the Main method.</param>
-//         /// <returns>The configured host.</returns>
-//         private static IHost ConfigureServices(string[] args)
-//         {
-//             var builder = Host.CreateApplicationBuilder();
+        var host = hostBuilder.Build();
 
-//             Logger.CreateLogger<Elster>();
+        try
+        {
+            await host.RunAsync();
+        }
+        catch (Exception)
+        {
+            Log.Fatal("Host has been terminated unexpectedly!");
+        }
+        finally
+        {
+            Log.CloseAndFlush();
+        }
+    }
 
-//             builder
-//                 .Services.AddSerilog()
-//                 .AddSingleton(client)
-//                 .AddSingleton<DiscordShardedClient>()
-//                 .AddSingleton<CommandService>()
-//                 .AddSingleton<CommandHandlerService>()
-//                 .AddHostedService<ElsterBot>();
+    private static IConfigurationRoot GetConfiguration(IHostEnvironment environment)
+    {
+        ConfigurationBuilder configuration = new();
 
-//             builder.Configuration.AddConfiguration(GetConfiguration(builder.Environment));
+        configuration
+            .SetBasePath(FoldersUtils.GetElsterCoreConfigPath(true))
+            .AddEnvironmentVariables("Elster_")
+            .AddJsonFile("elster.json", optional: true, reloadOnChange: false);
 
-//             return builder.Build();
-//         }
+        Log.Debug($"Environment is {environment.EnvironmentName}");
+        if (environment.IsDevelopment())
+        {
+            configuration.AddUserSecrets<Elster>();
+        }
 
-//         private static IConfigurationRoot GetConfiguration(IHostEnvironment environment)
-//         {
-//             ConfigurationBuilder configuration = new();
-
-//             // configuration.SetBasePath();
-
-//             configuration
-//                 .AddEnvironmentVariables("ELSTER_")
-//                 .AddJsonFile("elster.json", optional: true, reloadOnChange: false);
-
-//             Log.Information($"Environment is {environment.EnvironmentName}");
-//             if (environment.IsDevelopment())
-//             {
-//                 configuration.AddUserSecrets<Elster>();
-//             }
-
-//             return configuration.Build();
-//         }
-//     }
-// }
+        return configuration.Build();
+    }
+}
